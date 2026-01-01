@@ -1,5 +1,6 @@
 # main.py - Updated with first boot detection
 import tkinter as tk
+import sys
 from tkinter import ttk, messagebox
 import sqlite3
 import json
@@ -26,6 +27,10 @@ from setup_wizard import FirstTimeSetup
 
 class OSSimulator:
     def __init__(self):
+        # Check for CLI mode
+        if len(sys.argv) > 1 and sys.argv[1] == '--cli':
+            self.run_cli_mode()
+            return
         # Initialize logging
         self.setup_logging()
         
@@ -72,6 +77,23 @@ class OSSimulator:
         
         # Boot screen
         self.show_boot_screen()
+
+
+    def run_cli_mode(self):
+        """Run in CLI mode"""
+        print("Python OS Simulator - CLI Mode")
+        print("=" * 50)
+        
+        # Check if CLI tool exists
+        cli_path = 'os_cli.py'
+        if os.path.exists(cli_path):
+            # Pass all arguments except the first one
+            os.system(f'python {cli_path} {" ".join(sys.argv[2:])}')
+        else:
+            print("Error: CLI tool 'os_cli.py' not found.")
+            print("Make sure it's in the same directory as main.py")
+            
+        sys.exit(0)
         
     def check_first_boot(self):
         """Check if this is the first boot"""
