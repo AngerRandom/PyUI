@@ -119,6 +119,227 @@ class DatabaseManager:
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
+
+        # Trash table
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trash (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                original_path TEXT NOT NULL,
+                content TEXT,
+                size INTEGER DEFAULT 0,
+                deleted_by TEXT,
+                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                FOREIGN KEY (original_id) REFERENCES filesystem (id)
+            )
+        ''')
+        
+        # Create trash directory
+        self.cursor.execute('''
+            INSERT OR IGNORE INTO filesystem (name, type, path)
+            VALUES (?, ?, ?)
+        ''', ('.trash', 'directory', '/home'))
+        
+        # Create user trash directories
+        self.cursor.execute('SELECT username FROM users')
+        users = self.cursor.fetchall()
+        for user in users:
+            self.cursor.execute('''
+                INSERT OR IGNORE INTO filesystem (name, type, path)
+                VALUES (?, ?, ?)
+            ''', ('.trash', 'directory', f'/home/{user[0]}'))
+        
+        self.connection.commit()
+        
+    def move_to_trash(self, file_id, deleted_by='system'):
+        """Move a file/directory to trash"""
+        try:
+            # Get file info
+            self.cursor.execute('''
+                SELECT name, type, path, content, size
+                FROM filesystem WHERE id = ?
+            ''', (file_id,))
+            
+            file_info = self.cursor.fetchone()
+            if not file_info:
+                return False
+                
+            # Calculate expiration date (30 days from now)
+            from datetime import datetime, timedelta
+            expires_at = (datetime.now() + timedelta(days=30)).isoformat()
+            
+            # Move to trash
+            self.cursor.execute('''
+                INSERT INTO trash 
+                (original_id, name, type, original_path, content, size, deleted_by, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                file_id,
+                file_info['name'],
+                file_info['type'],
+                file_info['path'],
+                file_info['content'],
+                file_info['size'],
+                deleted_by,
+                expires_at
+            ))
+            
+            # Delete from filesystem
+            self.cursor.execute('DELETE FROM filesystem WHERE id = ?', (file_id,))
+            
+            # If it's a directory, move all contents to trash
+            if file_info['type'] == 'directory':
+                original_full_path = f"{file_info['path']}/{file_info['name']}"
+                self.cursor.execute('''
+                    SELECT id FROM filesystem 
+                    WHERE path = ? OR path LIKE ? || '/%'
+                ''', (original_full_path, original_full_path))
+                
+                sub_items = self.cursor.fetchall()
+                for item in sub_items:
+                    self.move_to_trash(item['id'], deleted_by)
+            
+            self.connection.commit()
+            return True
+            
+        except Exception as e:
+            print(f"Error moving to trash: {e}")
+            self.connection.rollback()
+            return False
+            
+    def restore_from_trash(self, trash_id):
+        """Restore an item from trash"""
+        try:
+            # Get trash item info
+            self.cursor.execute('''
+                SELECT original_id, name, type, original_path, content, size
+                FROM trash WHERE id = ?
+            ''', (trash_id,))
+            
+            trash_item = self.cursor.fetchone()
+            if not trash_item:
+                return False
+                
+            # Check if original location is available
+            self.cursor.execute('''
+                SELECT id FROM filesystem 
+                WHERE path = ? AND name = ? AND type = ?
+            ''', (
+                trash_item['original_path'],
+                trash_item['name'],
+                trash_item['type']
+            ))
+            
+            if self.cursor.fetchone():
+                # Name conflict - add timestamp
+                from datetime import datetime
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                new_name = f"{trash_item['name']}_restored_{timestamp}"
+            else:
+                new_name = trash_item['name']
+            
+            # Restore to filesystem
+            self.cursor.execute('''
+                INSERT INTO filesystem (name, type, path, content, size)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                new_name,
+                trash_item['type'],
+                trash_item['original_path'],
+                trash_item['content'],
+                trash_item['size']
+            ))
+            
+            # Delete from trash
+            self.cursor.execute('DELETE FROM trash WHERE id = ?', (trash_id,))
+            
+            self.connection.commit()
+            return True, new_name
+            
+        except Exception as e:
+            print(f"Error restoring from trash: {e}")
+            self.connection.rollback()
+            return False, None
+            
+    def empty_trash(self, user=None):
+        """Empty trash for a specific user or all users"""
+        try:
+            if user:
+                # Only empty items deleted by specific user
+                self.cursor.execute('DELETE FROM trash WHERE deleted_by = ?', (user,))
+            else:
+                # Empty all trash
+                self.cursor.execute('DELETE FROM trash')
+            
+            count = self.cursor.rowcount
+            self.connection.commit()
+            return count
+            
+        except Exception as e:
+            print(f"Error emptying trash: {e}")
+            self.connection.rollback()
+            return 0
+            
+    def get_trash_items(self, user=None, limit=100):
+        """Get items in trash"""
+        try:
+            query = '''
+                SELECT id, name, type, original_path, size, deleted_by, deleted_at, expires_at
+                FROM trash
+            '''
+            params = []
+            
+            if user:
+                query += ' WHERE deleted_by = ?'
+                params.append(user)
+                
+            query += ' ORDER BY deleted_at DESC LIMIT ?'
+            params.append(limit)
+            
+            self.cursor.execute(query, params)
+            return self.cursor.fetchall()
+            
+        except Exception as e:
+            print(f"Error getting trash items: {e}")
+            return []
+            
+    def get_trash_size(self, user=None):
+        """Get total size of items in trash"""
+        try:
+            query = 'SELECT SUM(size) as total_size FROM trash'
+            params = []
+            
+            if user:
+                query += ' WHERE deleted_by = ?'
+                params.append(user)
+                
+            self.cursor.execute(query, params)
+            result = self.cursor.fetchone()
+            return result['total_size'] or 0
+            
+        except Exception as e:
+            print(f"Error getting trash size: {e}")
+            return 0
+            
+    def cleanup_expired_trash(self):
+        """Clean up expired trash items (older than 30 days)"""
+        try:
+            self.cursor.execute('''
+                DELETE FROM trash 
+                WHERE expires_at < datetime('now')
+            ''')
+            
+            count = self.cursor.rowcount
+            self.connection.commit()
+            return count
+            
+        except Exception as e:
+            print(f"Error cleaning up expired trash: {e}")
+            self.connection.rollback()
+            return 0
         
         # Create default users
         self.create_default_users()
