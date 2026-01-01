@@ -19,8 +19,24 @@ class DatabaseManager:
         return self.connection
         
     def init_database(self):
-        """Initialize database tables"""
+        """Initialize database tables with first boot support"""
         self.connect()
+        
+        # System info table (for first boot detection)
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_info (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        
+        # Check if setup completed
+        self.cursor.execute("SELECT value FROM system_info WHERE key='setup_completed'")
+        result = self.cursor.fetchone()
+        
+        if not result:
+            # First boot - setup not completed yet
+            print("First boot detected - setup required")
         
         # Users table
         self.cursor.execute('''
@@ -169,5 +185,19 @@ class DatabaseManager:
         self.cursor.execute('''
             INSERT OR REPLACE INTO settings (user_id, setting_key, setting_value)
             VALUES (NULL, ?, ?)
+        ''', (key, value))
+        self.connection.commit()
+
+   def get_system_info(self, key, default=None):
+        """Get system information"""
+        self.cursor.execute('SELECT value FROM system_info WHERE key = ?', (key,))
+        result = self.cursor.fetchone()
+        return result[0] if result else default
+        
+   def set_system_info(self, key, value):
+        """Set system information"""
+        self.cursor.execute('''
+            INSERT OR REPLACE INTO system_info (key, value)
+            VALUES (?, ?)
         ''', (key, value))
         self.connection.commit()
