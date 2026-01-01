@@ -144,8 +144,20 @@ class TerminalApp:
         if not command:
             return
             
+        # Handle setup command
+        elif command == 'setup':
+            self.text_area.insert(tk.END, "\nLaunching setup wizard...")
+            self.os_app.show_setup_wizard()
+            
+        # Handle reset-setup command
+        elif command == 'reset-setup':
+            self.text_area.insert(tk.END, "\nResetting setup configuration...")
+            self.os_app.db.set_system_info('setup_completed', 'false')
+            self.text_area.insert(tk.END, "\nSetup has been reset. Restart to run setup wizard.")
+            
+            
         # Handle help
-        if command == 'help':
+        elif command == 'help':
             help_text = """
 Available commands:
 - help: Show this help
