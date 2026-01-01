@@ -1,7 +1,9 @@
+# database.py - Enhanced with user management
 import sqlite3
 import json
 from datetime import datetime
 import os
+import hashlib
 
 class DatabaseManager:
     def __init__(self, db_path='system.db'):
@@ -13,6 +15,7 @@ class DatabaseManager:
         """Connect to SQLite database"""
         self.connection = sqlite3.connect(self.db_path)
         self.cursor = self.connection.cursor()
+        self.connection.row_factory = sqlite3.Row  # Return rows as dictionaries
         return self.connection
         
     def init_database(self):
@@ -25,8 +28,12 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
+                full_name TEXT,
+                email TEXT,
+                is_admin BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP
+                last_login TIMESTAMP,
+                profile_pic TEXT
             )
         ''')
         
@@ -36,6 +43,7 @@ class DatabaseManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type TEXT NOT NULL,
                 event_data TEXT,
+                severity TEXT DEFAULT 'info',
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -45,10 +53,12 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS filesystem (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                type TEXT NOT NULL,  -- 'file' or 'directory'
+                type TEXT NOT NULL,
                 path TEXT NOT NULL,
                 content TEXT,
                 size INTEGER DEFAULT 0,
+                permissions TEXT DEFAULT 'rw-r--r--',
+                owner TEXT DEFAULT 'admin',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -65,92 +75,99 @@ class DatabaseManager:
             )
         ''')
         
-        # Create default admin user if not exists
+        # Installed applications
         self.cursor.execute('''
-            INSERT OR IGNORE INTO users (username, password) 
-            VALUES (?, ?)
-        ''', ('admin', 'password'))
+            CREATE TABLE IF NOT EXISTS installed_apps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                version TEXT,
+                author TEXT,
+                description TEXT,
+                entry_point TEXT,
+                icon_path TEXT,
+                category TEXT,
+                is_system_app BOOLEAN DEFAULT 0,
+                installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # User sessions
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                session_token TEXT,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time TIMESTAMP,
+                ip_address TEXT,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Create default users
+        self.create_default_users()
         
         # Create default filesystem structure
         self.create_default_filesystem()
         
+        # Create default settings
+        self.create_default_settings()
+        
         self.connection.commit()
         
-    def create_default_filesystem(self):
-        """Create default filesystem structure"""
-        default_structure = [
-            ('/', 'directory', '', None, 0),
-            ('/home', 'directory', '/', None, 0),
-            ('/home/admin', 'directory', '/home', None, 0),
-            ('/home/admin/Documents', 'directory', '/home/admin', None, 0),
-            ('/home/admin/Downloads', 'directory', '/home/admin', None, 0),
-            ('/home/admin/Pictures', 'directory', '/home/admin', None, 0),
-            ('/home/admin/Music', 'directory', '/home/admin', None, 0),
-            ('/etc', 'directory', '/', None, 0),
-            ('/var', 'directory', '/', None, 0),
-            ('/var/log', 'directory', '/var', None, 0),
-            ('welcome.txt', 'file', '/home/admin', 'Welcome to Python OS Simulator!\n\nThis is a simulated operating system built with Python and Tkinter.\n\nFeatures:\n- Desktop Interface\n- Applications\n- File System\n- Settings\n- Terminal\n\nEnjoy exploring!', 1024)
+    def hash_password(self, password):
+        """Hash password for storage"""
+        return hashlib.sha256(password.encode()).hexdigest()
+        
+    def create_default_users(self):
+        """Create default users"""
+        default_users = [
+            ('admin', 'password', 'Administrator', 'admin@system.local', 1),
+            ('user', 'password', 'Standard User', 'user@system.local', 0),
+            ('guest', 'guest', 'Guest User', 'guest@system.local', 0)
         ]
         
-        for name, type_, path, content, size in default_structure:
+        for username, password, full_name, email, is_admin in default_users:
+            hashed_pw = self.hash_password(password)
             self.cursor.execute('''
-                INSERT OR IGNORE INTO filesystem (name, type, path, content, size)
+                INSERT OR IGNORE INTO users (username, password, full_name, email, is_admin)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (name, type_, path, content, size))
-        
-    def log_event(self, event_type, event_data=None):
-        """Log system event"""
-        try:
-            data_str = json.dumps(event_data) if event_data else None
-            self.cursor.execute('''
-                INSERT INTO system_log (event_type, event_data)
-                VALUES (?, ?)
-            ''', (event_type, data_str))
-            self.connection.commit()
-        except Exception as e:
-            print(f"Error logging event: {e}")
+            ''', (username, hashed_pw, full_name, email, is_admin))
             
-    def get_user_settings(self, username, key=None):
-        """Get user settings"""
+    def authenticate_user(self, username, password):
+        """Authenticate user credentials"""
+        hashed_pw = self.hash_password(password)
         self.cursor.execute('''
-            SELECT s.setting_key, s.setting_value
-            FROM settings s
-            JOIN users u ON s.user_id = u.id
-            WHERE u.username = ?
+            SELECT id FROM users WHERE username = ? AND password = ?
+        ''', (username, hashed_pw))
+        return self.cursor.fetchone() is not None
+        
+    def get_users(self):
+        """Get list of all users"""
+        self.cursor.execute('SELECT username FROM users ORDER BY username')
+        return [row[0] for row in self.cursor.fetchall()]
+        
+    def update_last_login(self, username):
+        """Update user's last login time"""
+        self.cursor.execute('''
+            UPDATE users SET last_login = CURRENT_TIMESTAMP 
+            WHERE username = ?
         ''', (username,))
+        self.connection.commit()
         
-        settings = dict(self.cursor.fetchall())
-        return settings.get(key) if key else settings
-        
-    def update_user_settings(self, username, key, value):
-        """Update user settings"""
-        try:
-            self.cursor.execute('''
-                SELECT id FROM users WHERE username = ?
-            ''', (username,))
-            user_id = self.cursor.fetchone()[0]
-            
-            self.cursor.execute('''
-                INSERT OR REPLACE INTO settings (user_id, setting_key, setting_value)
-                VALUES (?, ?, ?)
-            ''', (user_id, key, value))
-            self.connection.commit()
-            return True
-        except Exception as e:
-            print(f"Error updating settings: {e}")
-            return False
-            
-    def list_directory(self, path):
-        """List directory contents"""
+    def get_setting(self, key, default=None):
+        """Get system setting"""
         self.cursor.execute('''
-            SELECT name, type, size, modified_at
-            FROM filesystem
-            WHERE path = ?
-            ORDER BY type, name
-        ''', (path,))
-        return self.cursor.fetchall()
+            SELECT setting_value FROM settings 
+            WHERE user_id IS NULL AND setting_key = ?
+        ''', (key,))
+        result = self.cursor.fetchone()
+        return result[0] if result else default
         
-    def close(self):
-        """Close database connection"""
-        if self.connection:
-            self.connection.close()
+    def set_setting(self, key, value):
+        """Set system setting"""
+        self.cursor.execute('''
+            INSERT OR REPLACE INTO settings (user_id, setting_key, setting_value)
+            VALUES (NULL, ?, ?)
+        ''', (key, value))
+        self.connection.commit()
