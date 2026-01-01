@@ -144,6 +144,26 @@ class TerminalApp:
         if not command:
             return
             
+        # Add CLI-related commands
+        elif command.startswith('sys-cli '):
+            # Forward command to CLI tool
+            cli_command = command[8:]
+            self.text_area.insert(tk.END, f"\nExecuting system command: {cli_command}")
+            
+            # Simulate CLI execution
+            if 'reset-system' in cli_command:
+                self.text_area.insert(tk.END, "\nSystem reset would be performed.")
+                self.text_area.insert(tk.END, "\nNote: Use the actual CLI tool for this.")
+            elif 'user --list' in cli_command:
+                # Show users from current system
+                users = self.os_app.db.get_users()
+                self.text_area.insert(tk.END, f"\nUsers: {', '.join(users)}")
+            else:
+                self.text_area.insert(tk.END, "\nUse 'pos' command from your system terminal.")
+                
+        elif command == 'cli-help':
+            self.show_cli_help()
+            
         # Handle setup command
         elif command == 'setup':
             self.text_area.insert(tk.END, "\nLaunching setup wizard...")
@@ -227,3 +247,30 @@ Available commands:
         # Unknown command
         else:
             self.text_area.insert(tk.END, f"\nCommand not found: {command}")
+
+    def show_cli_help(self):
+        """Show CLI help in terminal"""
+        help_text = """
+System Management CLI Tool
+==========================
+
+The Python OS Simulator includes a command-line interface (CLI)
+that can be used from your real system terminal.
+
+Usage:
+  python os_cli.py [command] [options]
+
+Basic Commands:
+  reset-system     - Reset system and trigger setup wizard
+  user --list      - List all users
+  reset-settings   - Reset all settings to default
+  status           - Show system status
+  backup           - Backup system database
+  restore          - Restore from backup
+
+Install as system command:
+  Run: python setup_cli.py
+
+For full help: python os_cli.py --help
+        """
+        self.text_area.insert(tk.END, f"\n{help_text}")
