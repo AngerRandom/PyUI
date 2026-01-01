@@ -1,4 +1,4 @@
-# main.py - Extended with new features
+# main.py - Updated with first boot detection
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
@@ -22,6 +22,7 @@ from themes.theme_manager import ThemeManager
 from window_manager import WindowManager
 from crash_handler import CrashHandler
 from package_manager import PackageManager
+from setup_wizard import FirstTimeSetup
 
 class OSSimulator:
     def __init__(self):
@@ -33,7 +34,7 @@ class OSSimulator:
         
         # Initialize database
         self.db = DatabaseManager()
-        self.db.init_database()
+        self.first_boot = self.check_first_boot()
         
         # Initialize theme manager
         self.theme_manager = ThemeManager()
@@ -72,6 +73,26 @@ class OSSimulator:
         # Boot screen
         self.show_boot_screen()
         
+    def check_first_boot(self):
+        """Check if this is the first boot"""
+        try:
+            # Check for setup completion flag
+            self.db.connect()
+            self.db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_info'")
+            if self.db.cursor.fetchone() is None:
+                return True
+                
+            # Check setup flag
+            self.db.cursor.execute("SELECT value FROM system_info WHERE key='setup_completed'")
+            result = self.db.cursor.fetchone()
+            if not result or result[0] != 'true':
+                return True
+                
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking first boot: {e}")
+            return True
+            
     def setup_logging(self):
         """Setup logging system"""
         logging.basicConfig(
@@ -85,59 +106,6 @@ class OSSimulator:
         self.logger = logging.getLogger(__name__)
         self.logger.info("OS Simulator initialized")
         
-    def load_installed_apps(self):
-        """Load installed applications from database"""
-        try:
-            self.db.connect()
-            self.db.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS installed_apps (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    version TEXT,
-                    author TEXT,
-                    description TEXT,
-                    entry_point TEXT,
-                    icon_path TEXT,
-                    category TEXT,
-                    installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            self.db.connection.commit()
-            
-            # Load default apps
-            default_apps = [
-                ('Terminal', '1.0', 'System', 'Command line interface', 
-                 'applications.terminal.TerminalApp', None, 'System'),
-                ('File Explorer', '1.0', 'System', 'File management', 
-                 'applications.file_explorer.FileExplorer', None, 'System'),
-                ('Paint', '1.0', 'System', 'Drawing application', 
-                 'applications.paint.PaintApp', None, 'Graphics'),
-                ('Media Player', '1.0', 'System', 'Media playback', 
-                 'applications.media_player.MediaPlayer', None, 'Multimedia'),
-                ('Settings', '1.0', 'System', 'System settings', 
-                 'applications.settings.SettingsApp', None, 'System'),
-                ('Web Browser', '1.0', 'System', 'Internet browser', 
-                 'applications.browser.Browser', None, 'Internet'),
-                ('Package Manager', '1.0', 'System', 'Application installer', 
-                 'applications.package_manager.PackageManagerApp', None, 'System'),
-            ]
-            
-            for app in default_apps:
-                self.db.cursor.execute('''
-                    INSERT OR IGNORE INTO installed_apps 
-                    (name, version, author, description, entry_point, icon_path, category)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', app)
-            self.db.connection.commit()
-            
-            # Get all installed apps
-            self.db.cursor.execute('SELECT name, entry_point, icon_path FROM installed_apps')
-            return {row[0]: {'entry_point': row[1], 'icon': row[2]} for row in self.db.cursor.fetchall()}
-            
-        except Exception as e:
-            self.logger.error(f"Error loading installed apps: {e}")
-            return {}
-            
     def show_boot_screen(self):
         """Display boot animation"""
         self.logger.info("Showing boot screen")
@@ -205,7 +173,7 @@ class OSSimulator:
             (4.5, "[  15.112890] Loading window manager..."),
             (5.2, "[  20.312345] Starting desktop environment..."),
             (5.8, "[  26.112890] Initializing user session..."),
-            (6.0, "[  32.112345] System ready for login...")
+            (6.0, "[  32.112345] System ready...")
         ]
         
         def update_boot(index=0, last_time=0):
@@ -221,9 +189,24 @@ class OSSimulator:
                 
                 self.root.after(delay, show_message)
             else:
-                self.root.after(1000, self.show_login_screen)
+                # Check if first boot
+                if self.first_boot:
+                    self.root.after(1000, self.show_setup_wizard)
+                else:
+                    self.root.after(1000, self.show_login_screen)
         
         update_boot()
+        
+    def show_setup_wizard(self):
+        """Show first-time setup wizard"""
+        self.logger.info("Showing setup wizard")
+        self.system_state = 'setup'
+        
+        # Clear boot screen
+        self.boot_frame.destroy()
+        
+        # Show setup wizard
+        self.setup_wizard = FirstTimeSetup(self.root, self)
         
     def show_login_screen(self):
         """Display login screen"""
@@ -312,7 +295,6 @@ class OSSimulator:
             insertbackground=theme['entry_fg']
         )
         self.password_entry.pack(side=tk.LEFT)
-        self.password_entry.insert(0, "password")
         
         # Login button
         login_btn = tk.Button(
@@ -332,41 +314,18 @@ class OSSimulator:
         options_frame = tk.Frame(center_frame, bg=theme['panel_bg'])
         options_frame.pack(fill=tk.X, pady=(20, 0))
         
-        # Shutdown button
-        shutdown_btn = tk.Button(
-            options_frame,
-            text="⏻",
-            font=('Arial', 14),
-            bg=theme['error'],
-            fg='white',
-            width=3,
-            command=self.show_shutdown_screen
-        )
-        shutdown_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Restart button
-        restart_btn = tk.Button(
-            options_frame,
-            text="↻",
-            font=('Arial', 14),
-            bg=theme['warning'],
-            fg='white',
-            width=3,
-            command=self.restart_system
-        )
-        restart_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Settings button
-        settings_btn = tk.Button(
-            options_frame,
-            text="⚙",
-            font=('Arial', 14),
-            bg=theme['accent'],
-            fg='white',
-            width=3,
-            command=self.open_login_settings
-        )
-        settings_btn.pack(side=tk.LEFT, padx=5)
+        # Setup button (visible on first boot or if setup incomplete)
+        if self.first_boot:
+            setup_btn = tk.Button(
+                options_frame,
+                text="⚙ Setup",
+                font=('Arial', 12),
+                bg=theme['info'],
+                fg='white',
+                padx=10,
+                command=self.show_setup_wizard
+            )
+            setup_btn.pack(side=tk.LEFT, padx=5)
         
         # Error label
         self.login_error = tk.Label(
