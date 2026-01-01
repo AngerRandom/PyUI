@@ -185,13 +185,14 @@ class OSSimulator:
         self.root.after(1000, self.simulate_boot)
         
     def simulate_boot(self):
-        """Simulate boot process with messages"""
+        """Simulate boot process with trash cleanup"""
         boot_messages = [
             (0.5, "[   0.502345] Setting up system architecture..."),
             (1.2, "[   1.702891] Initializing memory management..."),
             (2.1, "[   3.812345] Loading drivers..."),
             (3.0, "[   6.812890] Mounting filesystems..."),
             (3.8, "[  10.612345] Starting system services..."),
+            (4.0, "[  14.612890] Cleaning up expired trash..."),  # Added
             (4.5, "[  15.112890] Loading window manager..."),
             (5.2, "[  20.312345] Starting desktop environment..."),
             (5.8, "[  26.112890] Initializing user session..."),
@@ -218,6 +219,17 @@ class OSSimulator:
                     self.root.after(1000, self.show_login_screen)
         
         update_boot()
+
+    # After boot completes, run trash cleanup
+        def cleanup_trash():
+            try:
+                expired_count = self.db.cleanup_expired_trash()
+                if expired_count > 0:
+                    self.logger.info(f"Cleaned up {expired_count} expired trash items.")
+            except Exception as e:
+                self.logger.error(f"Error cleaning up trash: {e}")
+                
+        self.root.after(500, cleanup_trash)
         
     def show_setup_wizard(self):
         """Show first-time setup wizard"""
