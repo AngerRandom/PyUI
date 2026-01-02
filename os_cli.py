@@ -49,6 +49,11 @@ Examples:
   %(prog)s reset-settings             # Reset all settings to default
   %(prog)s status                     # Show system status
   %(prog)s backup --output backup.db  # Backup system database
+  %(prog)s trash --list              # List items in trash
+  %(prog)s trash --empty             # Empty trash
+  %(prog)s trash --restore 5         # Restore item with ID 5
+  %(prog)s trash --cleanup           # Clean up expired items
+  %(prog)s trash --size              # Show trash size
             '''
         )
         
@@ -141,6 +146,20 @@ Examples:
         repair_parser = subparsers.add_parser('repair', help='Repair system database')
         repair_parser.add_argument('--check', action='store_true',
                                  help='Check for issues without repairing')
+
+        # Trash command
+        trash_parser = subparsers.add_parser('trash', help='Trash management')
+        trash_group = trash_parser.add_mutually_exclusive_group(required=True)
+        trash_group.add_argument('--list', action='store_true', help='List trash items')
+        trash_group.add_argument('--empty', action='store_true', help='Empty trash')
+        trash_group.add_argument('--restore', metavar='ID', type=int, help='Restore item by ID')
+        trash_group.add_argument('--delete', metavar='ID', type=int, help='Delete item permanently')
+        trash_group.add_argument('--cleanup', action='store_true', help='Clean up expired items')
+        trash_group.add_argument('--size', action='store_true', help='Show trash size')
+        trash_group.add_argument('--stats', action='store_true', help='Show trash statistics')
+        
+        trash_parser.add_argument('--user', help='Specify user (default: all users)')
+        trash_parser.add_argument('--force', action='store_true', help='Force action without confirmation')
         
         # Parse arguments
         if len(sys.argv) == 1:
@@ -260,6 +279,295 @@ Examples:
             self.modify_user(args.modify, args.admin, args.name, args.email)
         elif args.reset_password:
             self.reset_password(args.reset_password)
+
+    def manage_trash(self, args):
+        """Handle trash commands"""
+        if args.list:
+            self.list_trash_items(args.user)
+        elif args.empty:
+            self.empty_trash(args.user, args.force)
+        elif args.restore:
+            self.restore_trash_item(args.restore, args.user)
+        elif args.delete:
+            self.delete_trash_item(args.delete, args.user, args.force)
+        elif args.cleanup:
+            self.cleanup_trash(args.user)
+        elif args.size:
+            self.show_trash_size(args.user)
+        elif args.stats:
+            self.show_trash_stats(args.user)
+            
+    def list_trash_items(self, user=None):
+        """List items in trash"""
+        print("=" * 60)
+        print("TRASH ITEMS")
+        print("=" * 60)
+        
+        items = self.os_app.db.get_trash_items(user, 100)
+        
+        if not items:
+            print("\nTrash is empty.")
+            return
+            
+        print(f"\n{'ID':<4} {'Name':<20} {'Type':<10} {'Size':<10} {'Deleted By':<12} {'Deleted Date':<19}")
+        print("-" * 85)
+        
+        for item in items:
+            size = self.format_size(item['size']) if item['size'] else '0 B'
+            deleted_at = item['deleted_at'][:19] if item['deleted_at'] else ''
+            
+            print(f"{item['id']:<4} {item['name']:<20} {item['type']:<10} "
+                  f"{size:<10} {item['deleted_by']:<12} {deleted_at:<19}")
+                  
+        print(f"\nTotal items: {len(items)}")
+        
+    def empty_trash(self, user=None, force=False):
+        """Empty trash"""
+        print("=" * 60)
+        print("EMPTY TRASH")
+        print("=" * 60)
+        
+        trash_size = self.os_app.db.get_trash_size(user)
+        items = self.os_app.db.get_trash_items(user, 1)
+        
+        if not items:
+            print("\nTrash is already empty.")
+            return
+            
+        if not force:
+            print(f"\n⚠️  WARNING: This will permanently delete all trash items!")
+            print(f"  Items: {len(items)} (or more)")
+            print(f"  Total size: {self.format_size(trash_size)}")
+            
+            if user:
+                print(f"  User: {user}")
+                
+            confirm = input("\nAre you sure you want to continue? (yes/NO): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("Operation cancelled.")
+                return
+                
+        print("\nEmptying trash...")
+        
+        try:
+            deleted_count = self.os_app.db.empty_trash(user)
+            print(f"✓ Emptied {deleted_count} item(s) from trash.")
+            
+        except Exception as e:
+            print(f"✗ Error emptying trash: {e}")
+            
+    def restore_trash_item(self, item_id, user=None):
+        """Restore item from trash"""
+        print(f"\nRestoring item ID: {item_id}")
+        
+        # Check if item exists
+        self.cursor.execute('SELECT * FROM trash WHERE id = ?', (item_id,))
+        item = self.cursor.fetchone()
+        
+        if not item:
+            print(f"Error: Item ID {item_id} not found in trash.")
+            return
+            
+        if user and item['deleted_by'] != user:
+            print(f"Error: Item belongs to user '{item['deleted_by']}', not '{user}'.")
+            return
+            
+        try:
+            success, new_name = self.os_app.db.restore_from_trash(item_id)
+            
+            if success:
+                print(f"✓ Restored '{item['name']}' from trash.")
+                if new_name:
+                    print(f"  Note: Renamed to '{new_name}' due to name conflict.")
+            else:
+                print("✗ Failed to restore item.")
+                
+        except Exception as e:
+            print(f"✗ Error restoring item: {e}")
+            
+    def delete_trash_item(self, item_id, user=None, force=False):
+        """Permanently delete item from trash"""
+        print(f"\nPermanently deleting item ID: {item_id}")
+        
+        # Check if item exists
+        self.cursor.execute('SELECT * FROM trash WHERE id = ?', (item_id,))
+        item = self.cursor.fetchone()
+        
+        if not item:
+            print(f"Error: Item ID {item_id} not found in trash.")
+            return
+            
+        if user and item['deleted_by'] != user:
+            print(f"Error: Item belongs to user '{item['deleted_by']}', not '{user}'.")
+            return
+            
+        if not force:
+            confirm = input(f"Permanently delete '{item['name']}'? (yes/NO): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("Operation cancelled.")
+                return
+                
+        try:
+            self.cursor.execute('DELETE FROM trash WHERE id = ?', (item_id,))
+            deleted = self.cursor.rowcount
+            
+            self.conn.commit()
+            
+            if deleted:
+                print(f"✓ Permanently deleted '{item['name']}'.")
+            else:
+                print("✗ Item not found.")
+                
+        except Exception as e:
+            print(f"✗ Error deleting item: {e}")
+            self.conn.rollback()
+            
+    def cleanup_trash(self, user=None):
+        """Clean up expired trash items"""
+        print("=" * 60)
+        print("CLEANUP EXPIRED TRASH")
+        print("=" * 60)
+        
+        print("\nCleaning up expired items (older than 30 days)...")
+        
+        try:
+            # Count items that will be deleted
+            self.cursor.execute('''
+                SELECT COUNT(*) FROM trash 
+                WHERE expires_at < datetime('now')
+            ''')
+            expired_count = self.cursor.fetchone()[0]
+            
+            if expired_count == 0:
+                print("✓ No expired items found.")
+                return
+                
+            print(f"Found {expired_count} expired item(s).")
+            
+            confirm = input("Clean up now? (yes/NO): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("Cleanup cancelled.")
+                return
+                
+            deleted_count = self.os_app.db.cleanup_expired_trash()
+            print(f"✓ Cleaned up {deleted_count} expired item(s).")
+            
+        except Exception as e:
+            print(f"✗ Error during cleanup: {e}")
+            
+    def show_trash_size(self, user=None):
+        """Show trash size"""
+        print("=" * 60)
+        print("TRASH SIZE")
+        print("=" * 60)
+        
+        try:
+            total_size = self.os_app.db.get_trash_size(user)
+            items = self.os_app.db.get_trash_items(user, 1000)
+            item_count = len(items)
+            
+            print(f"\nTrash Statistics:")
+            print(f"  Items: {item_count}")
+            print(f"  Total size: {self.format_size(total_size)}")
+            
+            if user:
+                print(f"  User: {user}")
+            else:
+                print(f"  User: All users")
+                
+            # Breakdown by type
+            file_count = sum(1 for item in items if item['type'] == 'file')
+            dir_count = sum(1 for item in items if item['type'] == 'directory')
+            
+            print(f"\nBreakdown:")
+            print(f"  Files: {file_count}")
+            print(f"  Directories: {dir_count}")
+            
+        except Exception as e:
+            print(f"Error getting trash size: {e}")
+            
+    def show_trash_stats(self, user=None):
+        """Show detailed trash statistics"""
+        print("=" * 60)
+        print("TRASH STATISTICS")
+        print("=" * 60)
+        
+        try:
+            items = self.os_app.db.get_trash_items(user, 1000)
+            
+            if not items:
+                print("\nTrash is empty.")
+                return
+                
+            # Basic stats
+            total_size = sum(item['size'] or 0 for item in items)
+            file_count = sum(1 for item in items if item['type'] == 'file')
+            dir_count = sum(1 for item in items if item['type'] == 'directory')
+            
+            print(f"\nBasic Statistics:")
+            print(f"  Total items: {len(items)}")
+            print(f"  Files: {file_count}")
+            print(f"  Directories: {dir_count}")
+            print(f"  Total size: {self.format_size(total_size)}")
+            
+            # Size distribution
+            size_categories = {
+                'Tiny (< 1KB)': 0,
+                'Small (1KB - 1MB)': 0,
+                'Medium (1MB - 10MB)': 0,
+                'Large (10MB - 100MB)': 0,
+                'Huge (> 100MB)': 0
+            }
+            
+            for item in items:
+                size = item['size'] or 0
+                if size < 1024:
+                    size_categories['Tiny (< 1KB)'] += 1
+                elif size < 1024 * 1024:
+                    size_categories['Small (1KB - 1MB)'] += 1
+                elif size < 10 * 1024 * 1024:
+                    size_categories['Medium (1MB - 10MB)'] += 1
+                elif size < 100 * 1024 * 1024:
+                    size_categories['Large (10MB - 100MB)'] += 1
+                else:
+                    size_categories['Huge (> 100MB)'] += 1
+                    
+            print(f"\nSize Distribution:")
+            for category, count in size_categories.items():
+                if count > 0:
+                    percentage = (count / len(items)) * 100
+                    print(f"  {category}: {count} items ({percentage:.1f}%)")
+                    
+            # User distribution (if not filtered by user)
+            if not user:
+                user_stats = {}
+                for item in items:
+                    user_stats[item['deleted_by']] = user_stats.get(item['deleted_by'], 0) + 1
+                    
+                print(f"\nBy User:")
+                for user_name, count in sorted(user_stats.items()):
+                    percentage = (count / len(items)) * 100
+                    print(f"  {user_name:<15}: {count} items ({percentage:.1f}%)")
+                    
+            # Oldest and newest items
+            if items:
+                dates = [item['deleted_at'] for item in items if item['deleted_at']]
+                if dates:
+                    dates.sort()
+                    print(f"\nTime Range:")
+                    print(f"  Oldest item: {dates[0][:19]}")
+                    print(f"  Newest item: {dates[-1][:19]}")
+                    
+        except Exception as e:
+            print(f"Error getting trash statistics: {e}")
+            
+    def format_size(self, size):
+        """Format size for display"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
             
     def list_users(self):
         """List all users"""
