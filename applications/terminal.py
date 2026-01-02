@@ -163,6 +163,20 @@ class TerminalApp:
                 
         elif command == 'cli-help':
             self.show_cli_help()
+
+        elif command == 'trash':
+            self.show_trash_info()
+        elif command.startswith('trash '):
+            subcommand = command[6:]
+            if subcommand == 'list':
+                self.list_trash_items()
+            elif subcommand == 'empty':
+                self.empty_trash()
+            elif subcommand.startswith('restore '):
+                item_id = subcommand[8:]
+                self.restore_trash_item(item_id)
+            else:
+                self.text_area.insert(tk.END, f"\nUnknown trash command: {subcommand}")
             
         # Handle setup command
         elif command == 'setup':
@@ -248,6 +262,103 @@ Available commands:
         else:
             self.text_area.insert(tk.END, f"\nCommand not found: {command}")
 
+    def show_trash_info(self):
+        """Show trash information in terminal"""
+        try:
+            items = self.os_app.db.get_trash_items(self.os_app.current_user, 50)
+            total_size = self.os_app.db.get_trash_size(self.os_app.current_user)
+            
+            self.text_area.insert(tk.END, f"\nTrash Bin - {self.os_app.current_user}")
+            self.text_area.insert(tk.END, f"\n{'='*50}")
+            self.text_area.insert(tk.END, f"\nItems: {len(items)}")
+            self.text_area.insert(tk.END, f"\nTotal size: {self.format_size(total_size)}")
+            self.text_area.insert(tk.END, f"\n")
+            
+            if items:
+                self.text_area.insert(tk.END, f"\nRecent items:")
+                self.text_area.insert(tk.END, f"\n{'ID':<4} {'Name':<20} {'Size':<10} {'Deleted'}")
+                self.text_area.insert(tk.END, f"\n{'-'*50}")
+                
+                for item in items[:10]:  # Show only 10 most recent
+                    size = self.format_size(item['size'] or 0)
+                    deleted_at = item['deleted_at'][:16] if item['deleted_at'] else ''
+                    self.text_area.insert(tk.END, f"\n{item['id']:<4} {item['name']:<20} "
+                                              f"{size:<10} {deleted_at}")
+            else:
+                self.text_area.insert(tk.END, f"\nTrash is empty.")
+                
+            self.text_area.insert(tk.END, f"\n")
+            self.text_area.insert(tk.END, f"\nCommands: trash list, trash empty, trash restore <id>")
+            
+        except Exception as e:
+            self.text_area.insert(tk.END, f"\nError getting trash info: {e}")
+            
+    def list_trash_items(self):
+        """List all trash items"""
+        try:
+            items = self.os_app.db.get_trash_items(self.os_app.current_user, 100)
+            
+            if not items:
+                self.text_area.insert(tk.END, f"\nTrash is empty.")
+                return
+                
+            self.text_area.insert(tk.END, f"\nTrash Items:")
+            self.text_area.insert(tk.END, f"\n{'='*70}")
+            self.text_area.insert(tk.END, f"\n{'ID':<4} {'Name':<20} {'Type':<10} "
+                                      f"{'Size':<10} {'Original Path':<20}")
+            self.text_area.insert(tk.END, f"\n{'-'*70}")
+            
+            for item in items:
+                size = self.format_size(item['size'] or 0)
+                self.text_area.insert(tk.END, f"\n{item['id']:<4} {item['name']:<20} "
+                                          f"{item['type']:<10} {size:<10} {item['original_path']:<20}")
+                                          
+            self.text_area.insert(tk.END, f"\n")
+            self.text_area.insert(tk.END, f"\nTotal: {len(items)} items")
+            
+        except Exception as e:
+            self.text_area.insert(tk.END, f"\nError listing trash items: {e}")
+            
+    def empty_trash(self):
+        """Empty trash"""
+        try:
+            items = self.os_app.db.get_trash_items(self.os_app.current_user, 1)
+            if not items:
+                self.text_area.insert(tk.END, f"\nTrash is already empty.")
+                return
+                
+            self.text_area.insert(tk.END, f"\nEmptying trash...")
+            
+            deleted_count = self.os_app.db.empty_trash(self.os_app.current_user)
+            
+            self.text_area.insert(tk.END, f"\n✓ Emptied {deleted_count} item(s) from trash.")
+            
+        except Exception as e:
+            self.text_area.insert(tk.END, f"\nError emptying trash: {e}")
+            
+    def restore_trash_item(self, item_id):
+        """Restore item from trash"""
+        try:
+            success, new_name = self.os_app.db.restore_from_trash(int(item_id))
+            
+            if success:
+                self.text_area.insert(tk.END, f"\n✓ Item restored from trash.")
+                if new_name:
+                    self.text_area.insert(tk.END, f"\n  Renamed to: {new_name}")
+            else:
+                self.text_area.insert(tk.END, f"\n✗ Failed to restore item.")
+                
+        except Exception as e:
+            self.text_area.insert(tk.END, f"\nError restoring item: {e}")
+            
+    def format_size(self, size):
+        """Format file size"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
+        
     def show_cli_help(self):
         """Show CLI help in terminal"""
         help_text = """
