@@ -132,6 +132,22 @@ class Desktop:
                 command=command
             )
             btn.pack(side=tk.LEFT, padx=2)
+
+    def setup_icons(self):
+        """Setup desktop icons including trash"""
+        icons_frame = tk.Frame(self.desktop_frame, bg='transparent')
+        icons_frame.place(x=20, y=20)
+        
+        # Define applications including trash
+        applications = [
+            ("Terminal", "term.png", self.open_terminal),
+            ("File Explorer", "files.png", self.open_file_explorer),
+            ("Paint", "paint.png", self.open_paint),
+            ("Media Player", "media.png", self.open_media_player),
+            ("Settings", "settings.png", self.open_settings),
+            ("Text Editor", "editor.png", self.open_text_editor),
+            ("Trash Bin", "trash.png", self.open_trash_bin)  # Added trash
+        ]
             
     def update_time(self):
         """Update time display"""
@@ -172,6 +188,18 @@ class Desktop:
         ).pack(side=tk.LEFT, padx=20, pady=20)
         
         # Application list
+        menu_items = [
+            ("Terminal", self.open_terminal),
+            ("File Explorer", self.open_file_explorer),
+            ("Paint", self.open_paint),
+            ("Media Player", self.open_media_player),
+            ("Settings", self.open_settings),
+            ("Calculator", self.open_calculator),
+            ("Text Editor", self.open_text_editor),
+            ("Trash Bin", self.open_trash_bin),  # Added
+            ("---", None),
+            ("Shutdown", self.os_app.show_shutdown_screen)
+        ]
         app_list_frame = tk.Frame(self.start_menu, bg=theme['menu_bg'])
         app_list_frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
         
@@ -255,3 +283,8 @@ class Desktop:
         if self.start_menu:
             self.start_menu.destroy()
             self.start_menu = None
+
+    def open_trash_bin(self):
+        """Open trash bin"""
+        from applications.trash_bin import TrashBin
+        trash = TrashBin(self.root, self.os_app)
