@@ -1,4 +1,4 @@
-# desktop.py - Enhanced with window management
+# desktop.py - Complete Desktop class with trash icon
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
@@ -132,7 +132,14 @@ class Desktop:
                 command=command
             )
             btn.pack(side=tk.LEFT, padx=2)
-
+            
+    def update_time(self):
+        """Update time display"""
+        current_time = time.strftime('%H:%M:%S')
+        current_date = time.strftime('%Y-%m-%d')
+        self.time_label.config(text=f"{current_date} {current_time}")
+        self.root.after(1000, self.update_time)
+        
     def setup_icons(self):
         """Setup desktop icons including trash"""
         icons_frame = tk.Frame(self.desktop_frame, bg='transparent')
@@ -148,16 +155,72 @@ class Desktop:
             ("Text Editor", "editor.png", self.open_text_editor),
             ("Trash Bin", "trash.png", self.open_trash_bin)  # Added trash
         ]
-            
-    def update_time(self):
-        """Update time display"""
-        current_time = time.strftime('%H:%M:%S')
-        current_date = time.strftime('%Y-%m-%d')
-        self.time_label.config(text=f"{current_date} {current_time}")
-        self.root.after(1000, self.update_time)
         
+        for i, (name, icon, command) in enumerate(applications):
+            icon_frame = tk.Frame(icons_frame, bg='transparent')
+            icon_frame.grid(row=i//4, column=i%4, padx=20, pady=10)
+            
+            # Icon label
+            if name == "Trash Bin":
+                # Get trash count for indicator
+                trash_count = self.get_trash_count()
+                
+                # Icon label with badge
+                icon_label = tk.Label(
+                    icon_frame,
+                    text="🗑️",
+                    font=('Arial', 24),
+                    bg='transparent',
+                    fg='white'
+                )
+                icon_label.pack()
+                
+                # Badge if items in trash
+                if trash_count > 0:
+                    badge = tk.Label(
+                        icon_frame,
+                        text=str(trash_count),
+                        font=('Arial', 8, 'bold'),
+                        bg='#e74c3c',
+                        fg='white',
+                        width=2,
+                        height=1
+                    )
+                    badge.place(relx=0.7, rely=0.1)
+            else:
+                icon_label = tk.Label(
+                    icon_frame,
+                    text="📁",
+                    font=('Arial', 24),
+                    bg='transparent',
+                    fg='white'
+                )
+                icon_label.pack()
+            
+            # Icon text
+            icon_text = tk.Label(
+                icon_frame,
+                text=name,
+                font=('Arial', 10),
+                bg='transparent',
+                fg='white'
+            )
+            icon_text.pack()
+            
+            # Bind click events
+            icon_label.bind('<Button-1>', lambda e, cmd=command: cmd())
+            icon_text.bind('<Button-1>', lambda e, cmd=command: cmd())
+            
+    def get_trash_count(self):
+        """Get number of items in trash for current user"""
+        try:
+            items = self.os_app.db.get_trash_items(self.os_app.current_user)
+            return len(items)
+        except:
+            return 0
+            
     def show_start_menu(self):
-        """Show enhanced start menu"""
+        """Show enhanced start menu with trash"""
         if self.start_menu and self.start_menu.winfo_exists():
             self.start_menu.destroy()
             self.start_menu = None
@@ -175,19 +238,7 @@ class Desktop:
         y = self.root.winfo_y() + self.root.winfo_height() - 540
         self.start_menu.geometry(f"+{x}+{y}")
         
-        # User info section
-        user_frame = tk.Frame(self.start_menu, bg=theme['accent'], height=80)
-        user_frame.pack(fill=tk.X)
-        
-        tk.Label(
-            user_frame,
-            text=self.os_app.current_user,
-            font=('Arial', 16, 'bold'),
-            fg='white',
-            bg=theme['accent']
-        ).pack(side=tk.LEFT, padx=20, pady=20)
-        
-        # Application list
+        # Menu items - THIS IS WHERE menu_items GOES!
         menu_items = [
             ("Terminal", self.open_terminal),
             ("File Explorer", self.open_file_explorer),
@@ -196,95 +247,84 @@ class Desktop:
             ("Settings", self.open_settings),
             ("Calculator", self.open_calculator),
             ("Text Editor", self.open_text_editor),
-            ("Trash Bin", self.open_trash_bin),  # Added
+            ("Trash Bin", self.open_trash_bin),  # Added trash bin to start menu
             ("---", None),
             ("Shutdown", self.os_app.show_shutdown_screen)
         ]
-        app_list_frame = tk.Frame(self.start_menu, bg=theme['menu_bg'])
-        app_list_frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
         
-        # Create scrollable app list
-        canvas = tk.Canvas(app_list_frame, bg=theme['menu_bg'], highlightthickness=0)
-        scrollbar = tk.Scrollbar(app_list_frame, orient=tk.VERTICAL, command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=theme['menu_bg'])
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Group apps by category
-        apps_by_category = {}
-        for app_name, app_info in self.os_app.installed_apps.items():
-            # Get category from database
-            category = "Applications"
-            apps_by_category.setdefault(category, []).append((app_name, app_info))
-        
-        # Display apps
-        for category, apps in apps_by_category.items():
-            tk.Label(
-                scrollable_frame,
-                text=category,
-                font=('Arial', 10, 'bold'),
-                fg=theme['menu_fg'],
-                bg=theme['menu_bg'],
-                anchor=tk.W
-            ).pack(fill=tk.X, padx=10, pady=(10, 5))
-            
-            for app_name, app_info in apps:
+        for item, command in menu_items:
+            if item == "---":
+                ttk.Separator(self.start_menu, orient='horizontal').pack(fill=tk.X, pady=5)
+            else:
                 btn = tk.Button(
-                    scrollable_frame,
-                    text=f"  {app_name}",
+                    self.start_menu,
+                    text=item,
+                    anchor='w',
                     font=('Arial', 11),
                     bg=theme['menu_bg'],
                     fg=theme['menu_fg'],
-                    anchor=tk.W,
-                    padx=10,
-                    pady=8,
-                    cursor='hand2',
-                    command=lambda name=app_name: self.launch_app_from_menu(name)
+                    padx=20,
+                    pady=10,
+                    width=20,
+                    command=command
                 )
-                btn.pack(fill=tk.X, padx=5)
+                btn.pack()
                 
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Bottom section
-        bottom_frame = tk.Frame(self.start_menu, bg=theme['menu_bg'], height=40)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        bottom_buttons = [
-            ("Settings", self.open_settings),
-            ("File Explorer", self.open_file_explorer),
-            ("Terminal", self.open_terminal)
-        ]
-        
-        for text, command in bottom_buttons:
-            tk.Button(
-                bottom_frame,
-                text=text,
-                font=('Arial', 9),
-                bg=theme['menu_bg'],
-                fg=theme['menu_fg'],
-                borderwidth=0,
-                cursor='hand2',
-                command=command
-            ).pack(side=tk.LEFT, padx=10)
-        
         # Bind close event
         self.start_menu.bind('<FocusOut>', lambda e: self.start_menu.destroy())
         
-    def launch_app_from_menu(self, app_name):
-        """Launch application from start menu"""
-        self.os_app.launch_application(app_name)
-        if self.start_menu:
-            self.start_menu.destroy()
-            self.start_menu = None
-
+    # Application launcher methods
+    def open_terminal(self):
+        """Open terminal application"""
+        from applications.terminal import TerminalApp
+        terminal = TerminalApp(self.root, self.os_app)
+        
+    def open_file_explorer(self):
+        """Open file explorer"""
+        from applications.file_explorer import FileExplorer
+        explorer = FileExplorer(self.root, self.os_app)
+        
+    def open_paint(self):
+        """Open paint application"""
+        from applications.paint import PaintApp
+        paint = PaintApp(self.root, self.os_app)
+        
+    def open_media_player(self):
+        """Open media player"""
+        from applications.media_player import MediaPlayer
+        player = MediaPlayer(self.root, self.os_app)
+        
+    def open_settings(self):
+        """Open settings"""
+        from applications.settings import SettingsApp
+        settings = SettingsApp(self.root, self.os_app)
+        
+    def open_text_editor(self):
+        """Open text editor"""
+        from applications.text_editor import TextEditor
+        editor = TextEditor(self.root, self.os_app)
+        
+    def open_calculator(self):
+        """Open calculator"""
+        from applications.calculator import Calculator
+        calc = Calculator(self.root, self.os_app)
+        
     def open_trash_bin(self):
         """Open trash bin"""
         from applications.trash_bin import TrashBin
         trash = TrashBin(self.root, self.os_app)
+        
+    def open_browser(self):
+        """Open web browser"""
+        from applications.browser import Browser
+        browser = Browser(self.root, self.os_app)
+        
+    def open_volume_mixer(self):
+        """Open volume mixer"""
+        # Implementation would go here
+        messagebox.showinfo("Volume Mixer", "Volume mixer would open here")
+        
+    def open_network_settings(self):
+        """Open network settings"""
+        # Implementation would go here
+        messagebox.showinfo("Network Settings", "Network settings would open here")
