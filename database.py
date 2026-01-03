@@ -409,13 +409,13 @@ class DatabaseManager:
         ''', (key, value))
         self.connection.commit()
 
-   def get_system_info(self, key, default=None):
+    def get_system_info(self, key, default=None):
         """Get system information"""
         self.cursor.execute('SELECT value FROM system_info WHERE key = ?', (key,))
         result = self.cursor.fetchone()
         return result[0] if result else default
         
-   def set_system_info(self, key, value):
+    def set_system_info(self, key, value):
         """Set system information"""
         self.cursor.execute('''
             INSERT OR REPLACE INTO system_info (key, value)
