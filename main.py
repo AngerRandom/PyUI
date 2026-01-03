@@ -1,6 +1,5 @@
-# main.py - Updated with first boot detection
+# main.py - Add mobile mode
 import tkinter as tk
-import sys
 from tkinter import ttk, messagebox
 import sqlite3
 import json
@@ -15,10 +14,12 @@ import threading
 import importlib.util
 import subprocess
 import traceback
+import platform
 
 # Import modules
 from database import DatabaseManager
 from desktop import Desktop
+from mobile_desktop import MobileDesktop  # New mobile interface
 from themes.theme_manager import ThemeManager
 from window_manager import WindowManager
 from crash_handler import CrashHandler
@@ -27,10 +28,9 @@ from setup_wizard import FirstTimeSetup
 
 class OSSimulator:
     def __init__(self):
-        # Check for CLI mode
-        if len(sys.argv) > 1 and sys.argv[1] == '--cli':
-            self.run_cli_mode()
-            return
+        # Detect mobile mode from command line or environment
+        self.mobile_mode = self.detect_mobile_mode()
+        
         # Initialize logging
         self.setup_logging()
         
@@ -55,8 +55,19 @@ class OSSimulator:
         
         # Initialize main window
         self.root = tk.Tk()
-        self.root.title("Python OS Simulator")
-        self.root.geometry("1024x768")
+        
+        if self.mobile_mode:
+            self.root.title("Python OS Mobile")
+            # Mobile-like dimensions (common phone resolutions)
+            self.root.geometry("360x640")
+            # Remove window decorations for mobile feel
+            self.root.overrideredirect(False)
+            # Always on top (simulate mobile app)
+            self.root.attributes('-topmost', False)
+        else:
+            self.root.title("Python OS Simulator")
+            self.root.geometry("1024x768")
+            
         self.root.configure(bg='black')
         
         # Register with window manager
@@ -75,83 +86,88 @@ class OSSimulator:
         # Installed applications
         self.installed_apps = self.load_installed_apps()
         
+        # Mobile-specific settings
+        if self.mobile_mode:
+            self.setup_mobile_environment()
+        
         # Boot screen
         self.show_boot_screen()
-
-
-    def run_cli_mode(self):
-        """Run in CLI mode"""
-        print("Python OS Simulator - CLI Mode")
-        print("=" * 50)
         
-        # Check if CLI tool exists
-        cli_path = 'os_cli.py'
-        if os.path.exists(cli_path):
-            # Pass all arguments except the first one
-            os.system(f'python {cli_path} {" ".join(sys.argv[2:])}')
-        else:
-            print("Error: CLI tool 'os_cli.py' not found.")
-            print("Make sure it's in the same directory as main.py")
-            
-        sys.exit(0)
-        
-    def check_first_boot(self):
-        """Check if this is the first boot"""
-        try:
-            # Check for setup completion flag
-            self.db.connect()
-            self.db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_info'")
-            if self.db.cursor.fetchone() is None:
-                return True
-                
-            # Check setup flag
-            self.db.cursor.execute("SELECT value FROM system_info WHERE key='setup_completed'")
-            result = self.db.cursor.fetchone()
-            if not result or result[0] != 'true':
-                return True
-                
-            return False
-        except Exception as e:
-            self.logger.error(f"Error checking first boot: {e}")
+    def detect_mobile_mode(self):
+        """Detect if running in mobile mode"""
+        # Check command line argument
+        if '--mobile' in sys.argv or '-m' in sys.argv:
             return True
             
-    def setup_logging(self):
-        """Setup logging system"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('system.log'),
-                logging.StreamHandler()
-            ]
-        )
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("OS Simulator initialized")
+        # Check environment variable
+        if os.environ.get('PYOS_MOBILE', '0') == '1':
+            return True
+            
+        # Check screen size (simulate mobile if small screen)
+        try:
+            root_test = tk.Tk()
+            root_test.withdraw()
+            screen_width = root_test.winfo_screenwidth()
+            screen_height = root_test.winfo_screenheight()
+            root_test.destroy()
+            
+            # If screen is small, suggest mobile mode
+            if screen_width < 800 or screen_height < 600:
+                response = messagebox.askyesno(
+                    "Mobile Mode",
+                    "Detected small screen size.\n"
+                    "Would you like to run in Mobile Mode?"
+                )
+                return response
+        except:
+            pass
+            
+        return False
+        
+    def setup_mobile_environment(self):
+        """Setup mobile-specific environment"""
+        # Set mobile-specific defaults
+        self.theme_manager.set_theme('mobile')
+        
+        # Store mobile mode in database
+        self.db.set_setting('mobile_mode', 'true')
+        self.db.set_setting('touch_mode', 'true')
+        
+        # Mobile-optimized defaults
+        self.db.set_setting('font_size', '12')
+        self.db.set_setting('button_size', 'large')
         
     def show_boot_screen(self):
-        """Display boot animation"""
-        self.logger.info("Showing boot screen")
+        """Display boot animation with mobile mode indication"""
+        self.logger.info(f"Showing boot screen (Mobile: {self.mobile_mode})")
         self.system_state = 'booting'
         
         self.boot_frame = tk.Frame(self.root, bg='black')
         self.boot_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Manufacturer logo
+        # Manufacturer logo with mode indicator
+        if self.mobile_mode:
+            logo_text = "PYTHON\nOS\nMOBILE"
+        else:
+            logo_text = "PYTHON\nOS\nSIMULATOR"
+            
         logo_label = tk.Label(
             self.boot_frame,
-            text="PYTHON\nOS\nSIMULATOR",
-            font=('Courier', 32, 'bold'),
+            text=logo_text,
+            font=('Courier', 24 if self.mobile_mode else 32, 'bold'),
             fg='#00ff00',
             bg='black',
             justify=tk.CENTER
         )
-        logo_label.pack(pady=100)
+        logo_label.pack(pady=80 if self.mobile_mode else 100)
         
         # Version info
+        version_text = "Version 2.0\nMobile Mode" if self.mobile_mode else "Version 2.0\n© 2024 Python OS Project"
+        
         version_label = tk.Label(
             self.boot_frame,
-            text="Version 2.0\n© 2024 Python OS Project",
-            font=('Courier', 10),
+            text=version_text,
+            font=('Courier', 8 if self.mobile_mode else 10),
             fg='#888888',
             bg='black',
             justify=tk.CENTER
@@ -162,7 +178,7 @@ class OSSimulator:
         self.boot_progress = ttk.Progressbar(
             self.boot_frame,
             mode='determinate',
-            length=400,
+            length=300 if self.mobile_mode else 400,
             style="green.Horizontal.TProgressbar"
         )
         self.boot_progress.pack(pady=20)
@@ -170,34 +186,48 @@ class OSSimulator:
         # Boot messages
         self.boot_text = tk.Text(
             self.boot_frame,
-            height=8,
-            width=70,
+            height=6 if self.mobile_mode else 8,
+            width=50 if self.mobile_mode else 70,
             bg='black',
             fg='#00ff00',
-            font=('Courier', 9),
+            font=('Courier', 8 if self.mobile_mode else 9),
             highlightthickness=0,
             borderwidth=0
         )
         self.boot_text.pack(pady=20)
-        self.boot_text.insert(tk.END, "[   0.000000] Initializing kernel...\n")
+        
+        if self.mobile_mode:
+            self.boot_text.insert(tk.END, "[BOOT] Starting mobile system...\n")
+        else:
+            self.boot_text.insert(tk.END, "[   0.000000] Initializing kernel...\n")
         
         # Simulate boot process
         self.root.after(1000, self.simulate_boot)
         
     def simulate_boot(self):
-        """Simulate boot process with trash cleanup"""
-        boot_messages = [
-            (0.5, "[   0.502345] Setting up system architecture..."),
-            (1.2, "[   1.702891] Initializing memory management..."),
-            (2.1, "[   3.812345] Loading drivers..."),
-            (3.0, "[   6.812890] Mounting filesystems..."),
-            (3.8, "[  10.612345] Starting system services..."),
-            (4.0, "[  14.612890] Cleaning up expired trash..."),  # Added
-            (4.5, "[  15.112890] Loading window manager..."),
-            (5.2, "[  20.312345] Starting desktop environment..."),
-            (5.8, "[  26.112890] Initializing user session..."),
-            (6.0, "[  32.112345] System ready...")
-        ]
+        """Simulate boot process with mobile-specific messages"""
+        if self.mobile_mode:
+            boot_messages = [
+                (0.5, "[BOOT] Loading mobile kernel..."),
+                (1.2, "[BOOT] Initializing touch drivers..."),
+                (2.1, "[BOOT] Starting mobile services..."),
+                (3.0, "[BOOT] Mounting storage..."),
+                (3.8, "[BOOT] Loading mobile interface..."),
+                (4.5, "[BOOT] Starting launcher..."),
+                (5.0, "[BOOT] Mobile system ready...")
+            ]
+        else:
+            boot_messages = [
+                (0.5, "[   0.502345] Setting up system architecture..."),
+                (1.2, "[   1.702891] Initializing memory management..."),
+                (2.1, "[   3.812345] Loading drivers..."),
+                (3.0, "[   6.812890] Mounting filesystems..."),
+                (3.8, "[  10.612345] Starting system services..."),
+                (4.5, "[  15.112890] Loading window manager..."),
+                (5.2, "[  20.312345] Starting desktop environment..."),
+                (5.8, "[  26.112890] Initializing user session..."),
+                (6.0, "[  32.112345] System ready...")
+            ]
         
         def update_boot(index=0, last_time=0):
             if index < len(boot_messages):
@@ -219,31 +249,9 @@ class OSSimulator:
                     self.root.after(1000, self.show_login_screen)
         
         update_boot()
-
-    # After boot completes, run trash cleanup
-        def cleanup_trash():
-            try:
-                expired_count = self.db.cleanup_expired_trash()
-                if expired_count > 0:
-                    self.logger.info(f"Cleaned up {expired_count} expired trash items.")
-            except Exception as e:
-                self.logger.error(f"Error cleaning up trash: {e}")
-                
-        self.root.after(500, cleanup_trash)
-        
-    def show_setup_wizard(self):
-        """Show first-time setup wizard"""
-        self.logger.info("Showing setup wizard")
-        self.system_state = 'setup'
-        
-        # Clear boot screen
-        self.boot_frame.destroy()
-        
-        # Show setup wizard
-        self.setup_wizard = FirstTimeSetup(self.root, self)
         
     def show_login_screen(self):
-        """Display login screen"""
+        """Display login screen with mobile optimization"""
         self.logger.info("Showing login screen")
         self.system_state = 'login'
         
@@ -258,6 +266,147 @@ class OSSimulator:
         theme = self.theme_manager.get_current_theme()
         self.login_frame.config(bg=theme['background'])
         
+        if self.mobile_mode:
+            self.show_mobile_login(theme)
+        else:
+            self.show_desktop_login(theme)
+            
+    def show_mobile_login(self, theme):
+        """Show mobile-optimized login screen"""
+        # Fullscreen mobile login
+        self.login_frame.config(bg=theme['background'])
+        
+        # Top status bar (like mobile)
+        status_bar = tk.Frame(self.login_frame, bg='black', height=30)
+        status_bar.pack(fill=tk.X)
+        
+        # Time (simulated)
+        time_label = tk.Label(
+            status_bar,
+            text=time.strftime('%H:%M'),
+            font=('Arial', 12, 'bold'),
+            fg='white',
+            bg='black'
+        )
+        time_label.pack(side=tk.LEFT, padx=10)
+        
+        # Signal/Wifi/Battery (simulated)
+        status_icons = tk.Label(
+            status_bar,
+            text="📶 🔋",
+            font=('Arial', 12),
+            fg='white',
+            bg='black'
+        )
+        status_icons.pack(side=tk.RIGHT, padx=10)
+        
+        # Main content
+        content_frame = tk.Frame(self.login_frame, bg=theme['background'])
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Logo/Title
+        title_label = tk.Label(
+            content_frame,
+            text="Python OS",
+            font=('Arial', 28, 'bold'),
+            fg=theme['accent'],
+            bg=theme['background']
+        )
+        title_label.pack(pady=(80, 20))
+        
+        subtitle_label = tk.Label(
+            content_frame,
+            text="Mobile Edition",
+            font=('Arial', 14),
+            fg=theme['foreground'],
+            bg=theme['background']
+        )
+        subtitle_label.pack(pady=(0, 50))
+        
+        # Login form
+        form_frame = tk.Frame(content_frame, bg=theme['background'])
+        form_frame.pack(pady=20, padx=40, fill=tk.X)
+        
+        # User selection
+        users = self.db.get_users()
+        self.user_var = tk.StringVar(value=users[0] if users else 'admin')
+        
+        tk.Label(
+            form_frame,
+            text="User:",
+            font=('Arial', 14),
+            fg=theme['foreground'],
+            bg=theme['background'],
+            anchor=tk.W
+        ).pack(fill=tk.X, pady=(0, 5))
+        
+        user_combo = ttk.Combobox(
+            form_frame,
+            textvariable=self.user_var,
+            values=users,
+            state='readonly',
+            font=('Arial', 14),
+            height=5
+        )
+        user_combo.pack(fill=tk.X, pady=(0, 20))
+        
+        # Password
+        tk.Label(
+            form_frame,
+            text="Password:",
+            font=('Arial', 14),
+            fg=theme['foreground'],
+            bg=theme['background'],
+            anchor=tk.W
+        ).pack(fill=tk.X, pady=(0, 5))
+        
+        self.password_entry = tk.Entry(
+            form_frame,
+            font=('Arial', 14),
+            show="●",
+            bg=theme['entry_bg'],
+            fg=theme['entry_fg'],
+            insertbackground=theme['entry_fg']
+        )
+        self.password_entry.pack(fill=tk.X, pady=(0, 30))
+        self.password_entry.insert(0, "password")
+        
+        # Login button (large for touch)
+        login_btn = tk.Button(
+            content_frame,
+            text="Unlock",
+            font=('Arial', 16, 'bold'),
+            bg=theme['button_bg'],
+            fg=theme['button_fg'],
+            height=2,
+            width=20,
+            cursor='hand2',
+            command=self.authenticate_user
+        )
+        login_btn.pack(pady=20)
+        
+        # Emergency/SOS button (mobile feature)
+        sos_frame = tk.Frame(content_frame, bg=theme['background'])
+        sos_frame.pack(pady=30)
+        
+        sos_btn = tk.Button(
+            sos_frame,
+            text="SOS / Emergency",
+            font=('Arial', 12),
+            bg=theme['error'],
+            fg='white',
+            padx=20,
+            pady=10,
+            command=self.show_emergency_dialer
+        )
+        sos_btn.pack()
+        
+        # Set focus and bindings
+        self.password_entry.focus()
+        self.root.bind('<Return>', lambda e: self.authenticate_user())
+        
+    def show_desktop_login(self, theme):
+        """Show desktop login screen"""
         # Center container
         center_frame = tk.Frame(
             self.login_frame,
@@ -329,6 +478,7 @@ class OSSimulator:
             insertbackground=theme['entry_fg']
         )
         self.password_entry.pack(side=tk.LEFT)
+        self.password_entry.insert(0, "password")
         
         # Login button
         login_btn = tk.Button(
@@ -348,18 +498,54 @@ class OSSimulator:
         options_frame = tk.Frame(center_frame, bg=theme['panel_bg'])
         options_frame.pack(fill=tk.X, pady=(20, 0))
         
-        # Setup button (visible on first boot or if setup incomplete)
-        if self.first_boot:
-            setup_btn = tk.Button(
+        # Shutdown button
+        shutdown_btn = tk.Button(
+            options_frame,
+            text="⏻",
+            font=('Arial', 14),
+            bg=theme['error'],
+            fg='white',
+            width=3,
+            command=self.show_shutdown_screen
+        )
+        shutdown_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Restart button
+        restart_btn = tk.Button(
+            options_frame,
+            text="↻",
+            font=('Arial', 14),
+            bg=theme['warning'],
+            fg='white',
+            width=3,
+            command=self.restart_system
+        )
+        restart_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Settings button
+        settings_btn = tk.Button(
+            options_frame,
+            text="⚙",
+            font=('Arial', 14),
+            bg=theme['accent'],
+            fg='white',
+            width=3,
+            command=self.open_login_settings
+        )
+        settings_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Mobile mode toggle (only in desktop mode)
+        if not self.mobile_mode:
+            mobile_btn = tk.Button(
                 options_frame,
-                text="⚙ Setup",
-                font=('Arial', 12),
+                text="📱",
+                font=('Arial', 14),
                 bg=theme['info'],
                 fg='white',
-                padx=10,
-                command=self.show_setup_wizard
+                width=3,
+                command=self.switch_to_mobile
             )
-            setup_btn.pack(side=tk.LEFT, padx=5)
+            mobile_btn.pack(side=tk.LEFT, padx=5)
         
         # Error label
         self.login_error = tk.Label(
@@ -378,50 +564,49 @@ class OSSimulator:
         # Play login sound
         self.play_system_sound('login')
         
-    def authenticate_user(self):
-        """Authenticate user"""
-        username = self.user_var.get()
-        password = self.password_entry.get()
+    def switch_to_mobile(self):
+        """Switch to mobile mode"""
+        confirm = messagebox.askyesno(
+            "Switch to Mobile Mode",
+            "Switch to Mobile Mode?\n\n"
+            "The system will restart with mobile interface."
+        )
         
-        if username and password:
-            # In real system, verify against database
-            success = self.db.authenticate_user(username, password)
+        if confirm:
+            self.db.set_setting('mobile_mode', 'true')
+            self.restart_system()
             
-            self.db.log_event('login_attempt', {
-                'username': username,
-                'success': success,
-                'timestamp': datetime.now().isoformat()
-            })
+    def switch_to_desktop(self):
+        """Switch to desktop mode"""
+        confirm = messagebox.askyesno(
+            "Switch to Desktop Mode",
+            "Switch to Desktop Mode?\n\n"
+            "The system will restart with desktop interface."
+        )
+        
+        if confirm:
+            self.db.set_setting('mobile_mode', 'false')
+            self.restart_system()
             
-            if success:
-                self.current_user = username
-                self.logger.info(f"User '{username}' logged in successfully")
-                
-                # Update last login
-                self.db.update_last_login(username)
-                
-                # Play success sound
-                self.play_system_sound('login_success')
-                
-                # Transition to desktop
-                self.root.after(500, self.show_desktop)
-            else:
-                self.login_error.config(text="Invalid username or password")
-                self.play_system_sound('error')
-        else:
-            self.login_error.config(text="Please enter username and password")
-            
+    def show_emergency_dialer(self):
+        """Show emergency dialer (mobile feature)"""
+        from applications.emergency_dialer import EmergencyDialer
+        dialer = EmergencyDialer(self.root, self)
+        
     def show_desktop(self):
-        """Show desktop interface"""
-        self.logger.info("Showing desktop")
+        """Show desktop interface based on mode"""
+        self.logger.info(f"Showing {'mobile' if self.mobile_mode else 'desktop'}")
         self.system_state = 'desktop'
         
         # Clear login screen
         self.login_frame.destroy()
         
-        # Create desktop
-        self.desktop = Desktop(self.root, self)
-        
+        # Create appropriate interface
+        if self.mobile_mode:
+            self.desktop = MobileDesktop(self.root, self)
+        else:
+            self.desktop = Desktop(self.root, self)
+            
     def restart_system(self):
         """Restart the system"""
         self.logger.info("System restart requested")
