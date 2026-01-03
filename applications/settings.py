@@ -83,6 +83,119 @@ class SettingsApp:
         
         info_frame = tk.Frame(parent)
         info_frame.pack(fill=tk.X, padx=40, pady=10)
+
+        # Trash settings
+        tk.Label(parent, text="Trash Settings:", font=('Arial', 12, 'bold')).pack(
+            anchor=tk.W, padx=20, pady=(30, 10))
+        
+        trash_frame = tk.Frame(parent, bg='#f8f9fa', relief=tk.SUNKEN, borderwidth=1)
+        trash_frame.pack(fill=tk.X, padx=40, pady=10)
+        
+        # Auto-cleanup option
+        self.auto_cleanup_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            trash_frame,
+            text="Automatically clean up expired items (30 days)",
+            variable=self.auto_cleanup_var,
+            font=('Arial', 11),
+            bg='#f8f9fa'
+        ).pack(anchor=tk.W, pady=5)
+        
+        # Retention period
+        period_frame = tk.Frame(trash_frame, bg='#f8f9fa')
+        period_frame.pack(anchor=tk.W, pady=5)
+        
+        tk.Label(period_frame, text="Retention period:", bg='#f8f9fa').pack(side=tk.LEFT)
+        self.retention_var = tk.StringVar(value='30')
+        period_spin = tk.Spinbox(
+            period_frame,
+            from_=1,
+            to=365,
+            textvariable=self.retention_var,
+            width=5
+        )
+        period_spin.pack(side=tk.LEFT, padx=5)
+        tk.Label(period_frame, text="days", bg='#f8f9fa').pack(side=tk.LEFT)
+        
+        # Empty trash button
+        tk.Button(
+            trash_frame,
+            text="Empty Trash Now",
+            bg='#e74c3c',
+            fg='white',
+            command=self.empty_trash_now
+        ).pack(pady=10)
+        
+        # Trash statistics
+        stats_btn = tk.Button(
+            trash_frame,
+            text="Show Trash Statistics",
+            command=self.show_trash_stats
+        )
+        stats_btn.pack(pady=5)
+        
+    def empty_trash_now(self):
+        """Empty trash from settings"""
+        confirm = messagebox.askyesno(
+            "Empty Trash",
+            "Permanently delete all items in trash?\n\n"
+            "This action cannot be undone!"
+        )
+        
+        if confirm:
+            try:
+                deleted_count = self.os_app.db.empty_trash(self.os_app.current_user)
+                messagebox.showinfo(
+                    "Trash Emptied",
+                    f"Emptied {deleted_count} item(s) from trash."
+                )
+            except Exception as e:
+                messagebox.showerror("Error", f"Cannot empty trash: {e}")
+                
+    def show_trash_stats(self):
+        """Show trash statistics dialog"""
+        try:
+            items = self.os_app.db.get_trash_items(self.os_app.current_user, 1000)
+            total_size = self.os_app.db.get_trash_size(self.os_app.current_user)
+            
+            stats_window = tk.Toplevel(self.window)
+            stats_window.title("Trash Statistics")
+            stats_window.geometry("400x300")
+            
+            tk.Label(
+                stats_window,
+                text="Trash Statistics",
+                font=('Arial', 16, 'bold')
+            ).pack(pady=10)
+            
+            stats_text = f"""
+Items in trash: {len(items)}
+Total size: {self.format_size(total_size)}
+
+Breakdown:
+  Files: {sum(1 for item in items if item['type'] == 'file')}
+  Directories: {sum(1 for item in items if item['type'] == 'directory')}
+
+Items will be automatically removed after 30 days.
+            """
+            
+            tk.Label(
+                stats_window,
+                text=stats_text,
+                font=('Courier', 11),
+                justify=tk.LEFT
+            ).pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot get trash statistics: {e}")
+            
+    def format_size(self, size):
+        """Format size for display"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+        return f"{size:.1f} TB"
         
         # Get system info
         setup_date = self.os_app.db.get_system_info('setup_timestamp', 'Unknown')
