@@ -118,6 +118,32 @@ class ThemeManager:
                 'panel_bg': '#34495e',
                 'highlight': '#4a6572',
                 'wallpaper': 'assets/wallpaper/blue.jpg'
+            },
+            'mobile': {
+                'name': 'Mobile',
+                'background': '#121212',
+                'foreground': '#ffffff',
+                'accent': '#2196F3',
+                'error': '#f44336',
+                'success': '#4CAF50',
+                'warning': '#FF9800',
+                'info': '#00BCD4',
+                'font_family': 'Roboto, Arial',
+                'font_size': 14,
+                'cursor': 'hand2',
+                'button_bg': '#2196F3',
+                'button_fg': 'white',
+                'entry_bg': '#2a2a2a',
+                'entry_fg': 'white',
+                'taskbar_bg': '#1a1a1a',
+                'taskbar_fg': 'white',
+                'start_button_bg': '#2196F3',
+                'start_button_fg': 'white',
+                'menu_bg': '#1a1a1a',
+                'menu_fg': 'white',
+                'panel_bg': '#2a2a2a',
+                'highlight': '#333333',
+                'wallpaper': 'assets/wallpaper/mobile.jpg'
             }
         }
         
