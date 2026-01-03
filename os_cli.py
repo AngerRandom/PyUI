@@ -54,6 +54,9 @@ Examples:
   %(prog)s trash --restore 5         # Restore item with ID 5
   %(prog)s trash --cleanup           # Clean up expired items
   %(prog)s trash --size              # Show trash size
+  %(prog)s mode --mobile          # Switch to mobile mode
+  %(prog)s mode --desktop         # Switch to desktop mode
+  %(prog)s mode --status          # Check current mode
             '''
         )
         
@@ -160,6 +163,14 @@ Examples:
         
         trash_parser.add_argument('--user', help='Specify user (default: all users)')
         trash_parser.add_argument('--force', action='store_true', help='Force action without confirmation')
+
+        # Mode command
+        mode_parser = subparsers.add_parser('mode', help='Switch between mobile/desktop')
+        mode_group = mode_parser.add_mutually_exclusive_group(required=True)
+        mode_group.add_argument('--mobile', action='store_true', help='Switch to mobile mode')
+        mode_group.add_argument('--desktop', action='store_true', help='Switch to desktop mode')
+        mode_group.add_argument('--status', action='store_true', help='Check current mode')
+        
         
         # Parse arguments
         if len(sys.argv) == 1:
@@ -193,6 +204,95 @@ Examples:
             self.repair_database(args.check)
         else:
             parser.print_help()
+
+    def manage_mode(self, args):
+        """Handle mode commands"""
+        if args.mobile:
+            self.switch_to_mobile()
+        elif args.desktop:
+            self.switch_to_desktop()
+        elif args.status:
+            self.check_mode_status()
+            
+    def switch_to_mobile(self):
+        """Switch to mobile mode"""
+        print("=" * 60)
+        print("SWITCH TO MOBILE MODE")
+        print("=" * 60)
+        
+        print("\nThis will:")
+        print("• Set system to mobile mode")
+        print("• Apply mobile theme")
+        print("• Optimize for touch interface")
+        
+        confirm = input("\nSwitch to mobile mode? (yes/NO): ").strip().lower()
+        if confirm not in ['yes', 'y']:
+            print("Operation cancelled.")
+            return
+            
+        try:
+            # Update database settings
+            self.cursor.execute("DELETE FROM settings WHERE setting_key = 'mobile_mode'")
+            self.cursor.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('mobile_mode', 'true')")
+            
+            self.conn.commit()
+            print("✓ Switched to mobile mode.")
+            print("\nRestart the OS Simulator to apply changes.")
+            
+        except Exception as e:
+            print(f"✗ Error switching mode: {e}")
+            
+    def switch_to_desktop(self):
+        """Switch to desktop mode"""
+        print("=" * 60)
+        print("SWITCH TO DESKTOP MODE")
+        print("=" * 60)
+        
+        print("\nThis will:")
+        print("• Set system to desktop mode")
+        print("• Apply desktop theme")
+        print("• Optimize for mouse/keyboard")
+        
+        confirm = input("\nSwitch to desktop mode? (yes/NO): ").strip().lower()
+        if confirm not in ['yes', 'y']:
+            print("Operation cancelled.")
+            return
+            
+        try:
+            # Update database settings
+            self.cursor.execute("DELETE FROM settings WHERE setting_key = 'mobile_mode'")
+            self.cursor.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('mobile_mode', 'false')")
+            
+            self.conn.commit()
+            print("✓ Switched to desktop mode.")
+            print("\nRestart the OS Simulator to apply changes.")
+            
+        except Exception as e:
+            print(f"✗ Error switching mode: {e}")
+            
+    def check_mode_status(self):
+        """Check current mode"""
+        print("=" * 60)
+        print("MODE STATUS")
+        print("=" * 60)
+        
+        try:
+            self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'mobile_mode'")
+            result = self.cursor.fetchone()
+            
+            if result:
+                is_mobile = result[0] == 'true'
+                mode = "Mobile" if is_mobile else "Desktop"
+                print(f"\nCurrent mode: {mode}")
+            else:
+                print("\nCurrent mode: Desktop (default)")
+                
+            print("\nTo change mode:")
+            print("  pos mode --mobile    # Switch to mobile")
+            print("  pos mode --desktop   # Switch to desktop")
+            
+        except Exception as e:
+            print(f"Error checking mode: {e}")
             
     def reset_system(self, force=False):
         """Reset system and trigger setup wizard"""
