@@ -144,6 +144,58 @@ class Desktop:
         """Setup desktop icons including trash"""
         icons_frame = tk.Frame(self.desktop_frame, bg='transparent')
         icons_frame.place(x=20, y=20)
+
+        # Add trash icon with indicator
+    trash_icon_frame = tk.Frame(icons_frame, bg='transparent')
+    trash_icon_frame.grid(row=len(applications)//4, column=len(applications)%4, padx=20, pady=10)
+    
+    # Get trash count for indicator
+    trash_count = self.get_trash_count()
+    
+    # Icon label with badge
+    trash_label = tk.Label(
+        trash_icon_frame,
+        text="🗑️",
+        font=('Arial', 24),
+        bg='transparent',
+        fg='white'
+    )
+    trash_label.pack()
+    
+    # Badge if items in trash
+    if trash_count > 0:
+        badge = tk.Label(
+            trash_icon_frame,
+            text=str(trash_count),
+            font=('Arial', 8, 'bold'),
+            bg='#e74c3c',
+            fg='white',
+            width=2,
+            height=1
+        )
+        badge.place(relx=0.7, rely=0.1)
+        
+    # Icon text
+    icon_text = tk.Label(
+        trash_icon_frame,
+        text="Trash Bin",
+        font=('Arial', 10),
+        bg='transparent',
+        fg='white'
+    )
+    icon_text.pack()
+    
+    # Bind click events
+    trash_label.bind('<Button-1>', lambda e: self.open_trash_bin())
+    icon_text.bind('<Button-1>', lambda e: self.open_trash_bin())
+    
+def get_trash_count(self):
+    """Get number of items in trash for current user"""
+    try:
+        items = self.os_app.db.get_trash_items(self.os_app.current_user)
+        return len(items)
+    except:
+        return 0
         
         # Define applications including trash
         applications = [
